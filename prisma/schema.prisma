@@ -1,0 +1,408 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-arm64-openssl-3.0.x", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum EnvType {
+  demo
+  live
+}
+
+enum TradeMode {
+  analysis
+  paper
+  live
+}
+
+enum OrderAction {
+  open_long
+  close_long
+  open_short
+  close_short
+  buy
+  sell
+  cancel
+  hold
+}
+
+enum OrderSide {
+  buy
+  sell
+}
+
+enum OrderType {
+  market
+  limit
+}
+
+enum OrderStatus {
+  pending
+  placed
+  partially_filled
+  filled
+  canceled
+  rejected
+  blocked
+}
+
+enum TriggerSource {
+  ai
+  manual
+  risk
+  take_profit_stop_loss
+}
+
+enum RiskLevel {
+  low
+  medium
+  high
+}
+
+enum LogLevel {
+  info
+  warn
+  error
+  debug
+}
+
+model User {
+  id               String             @id @default(cuid())
+  email            String             @unique
+  name             String?
+  isActive         Boolean            @default(true)
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  exchangeAccounts ExchangeAccount[]
+  llmConfigs       LlmProviderConfig[]
+  promptConfigs    TradingPromptConfig[]
+  strategyConfigs  StrategyConfig[]
+  riskConfigs      RiskConfig[]
+  subscriptions    InstrumentSubscription[]
+  aiDecisionLogs   AiDecisionLog[]
+  tradeOrders      TradeOrder[]
+  tradeFills       TradeFill[]
+  positionSnaps    PositionSnapshot[]
+  accountSnaps     AccountSnapshot[]
+  pnlDaily         PnLDaily[]
+  systemLogs       SystemLog[]
+  auditLogs        AuditLog[]
+  replayNotes      ReplayNote[]
+}
+
+model ExchangeAccount {
+  id                    String   @id @default(cuid())
+  userId                String
+  exchange              String   @default("okx")
+  envType               EnvType  @default(demo)
+  label                 String   @default("Default OKX")
+  apiKeyMasked          String
+  encryptedApiKey       String   @default("")
+  encryptedSecret       String
+  encryptedPassphrase   String
+  isDefault             Boolean  @default(true)
+  readOnly              Boolean  @default(true)
+  enableAutoTrading     Boolean  @default(false)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, exchange, envType])
+}
+
+model LlmProviderConfig {
+  id                         String   @id @default(cuid())
+  userId                     String
+  provider                   String
+  model                      String
+  apiKeyMasked               String
+  encryptedApiKey            String
+  baseUrl                    String
+  temperature                Float    @default(0.2)
+  maxTokens                  Int      @default(800)
+  systemPrompt               String
+  tradingPrompt              String
+  decisionSchema             Json
+  secondaryConfirmation      Boolean  @default(false)
+  multiModelVoting           Boolean  @default(false)
+  structuredReasonOutput     Boolean  @default(true)
+  isDefault                  Boolean  @default(false)
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, provider, isDefault])
+}
+
+model TradingPromptConfig {
+  id          String   @id @default(cuid())
+  userId      String
+  name        String
+  content     String
+  isDefault   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isDefault])
+}
+
+model StrategyConfig {
+  id                      String    @id @default(cuid())
+  userId                  String
+  name                    String
+  exchange                String    @default("okx")
+  symbols                 String[]
+  timeframe               String    @default("15m")
+  leverage                Float     @default(1)
+  minLeverage             Float     @default(1)
+  maxLeverage             Float     @default(3)
+  maxPositionPct          Float     @default(20)
+  perTradeRiskPct         Float     @default(1)
+  stopLossPct             Float     @default(1.5)
+  takeProfitPct           Float     @default(3)
+  maxDrawdownPct          Float     @default(15)
+  llmPromptTemplate       String    @default("请基于以下信息输出交易决策JSON：\\n标的：{{symbol}}\\n时间：{{timestamp}}\\n账户：{{balance}}\\n行情：{{market_data}}")
+  mode                    TradeMode @default(analysis)
+  autoTradingEnabled      Boolean   @default(false)
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model RiskConfig {
+  id                           String   @id @default(cuid())
+  userId                       String
+  maxPositionValue             Float
+  maxSingleOrderValue          Float
+  maxDailyLoss                 Float
+  maxDrawdownPct               Float
+  maxConsecutiveLosses         Int
+  stopOnModelError             Boolean  @default(true)
+  stopOnApiError               Boolean  @default(true)
+  highVolatilityPause          Boolean  @default(true)
+  volatilityThreshold          Float    @default(4)
+  whitelistSymbols             String[]
+  blacklistSymbols             String[]
+  killSwitchEnabled            Boolean  @default(false)
+  createdAt                    DateTime @default(now())
+  updatedAt                    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model InstrumentSubscription {
+  id          String   @id @default(cuid())
+  userId      String
+  exchange    String   @default("okx")
+  symbol      String
+  timeframe   String
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, symbol, timeframe])
+}
+
+model MarketSnapshot {
+  id                 String   @id @default(cuid())
+  symbol             String
+  timeframe          String
+  source             String   @default("okx")
+  candleData         Json
+  indicators         Json
+  orderBook          Json?
+  fundingRate        Float?
+  marketSummary      String
+  createdAt          DateTime @default(now())
+
+  aiDecisions AiDecisionLog[]
+
+  @@index([symbol, timeframe, createdAt])
+}
+
+model AiDecisionLog {
+  id                      String     @id @default(cuid())
+  userId                  String
+  modelName               String
+  provider                String
+  inputPrompt             String
+  marketContext           Json
+  modelOutputJson         Json
+  finalAction             OrderAction
+  confidence              Int
+  blockedByRisk           Boolean    @default(false)
+  blockReason             String?
+  tokenUsage              Json?
+  latencyMs               Int?
+  errorMessage            String?
+  marketSnapshotId        String?
+  createdAt               DateTime   @default(now())
+
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  marketSnapshot MarketSnapshot? @relation(fields: [marketSnapshotId], references: [id])
+  tradeOrders    TradeOrder[]
+
+  @@index([userId, createdAt])
+}
+
+model TradeOrder {
+  id                       String      @id @default(cuid())
+  traceId                  String?
+  executionId              String?
+  userId                   String
+  aiDecisionLogId          String?
+  exchange                 String      @default("okx")
+  envType                  EnvType     @default(demo)
+  symbol                   String
+  action                   OrderAction
+  side                     OrderSide
+  orderType                OrderType
+  status                   OrderStatus @default(pending)
+  triggerSource            TriggerSource
+  price                    Float?
+  quantity                 Float
+  fee                      Float?
+  estimatedSlippage        Float?
+  orderResponse            Json?
+  aiDecisionSummary        String?
+  aiRawReason              String?
+  reasonTags               String[]
+  marketSnapshot           Json
+  accountSnapshotBefore    Json
+  accountSnapshotAfter     Json?
+  createdAt                DateTime    @default(now())
+  updatedAt                DateTime    @updatedAt
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  aiDecision   AiDecisionLog? @relation(fields: [aiDecisionLogId], references: [id])
+  fills        TradeFill[]
+
+  @@index([traceId])
+  @@index([userId, createdAt])
+}
+
+model TradeFill {
+  id             String   @id @default(cuid())
+  traceId        String?
+  executionId    String?
+  userId         String
+  tradeOrderId   String
+  symbol         String?
+  fillPrice      Float?
+  fillSize       Float?
+  fee            Float?
+  feeCcy         String?
+  slippage       Float?
+  slippageBps    Float?
+  rawFill        Json?
+  liquidity      String?
+  filledAt       DateTime @default(now())
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tradeOrder TradeOrder @relation(fields: [tradeOrderId], references: [id], onDelete: Cascade)
+
+  @@index([traceId])
+  @@index([tradeOrderId, filledAt])
+}
+
+model PositionSnapshot {
+  id          String   @id @default(cuid())
+  userId      String
+  symbol      String
+  side        String
+  quantity    Float
+  entryPrice  Float
+  markPrice   Float
+  unrealizedPnl Float
+  leverage    Float
+  snapshotAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, snapshotAt])
+}
+
+model AccountSnapshot {
+  id              String   @id @default(cuid())
+  userId          String
+  equity          Float
+  balance         Float
+  available       Float
+  marginRatio     Float?
+  totalUnrealized Float?
+  snapshotAt      DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, snapshotAt])
+}
+
+model PnLDaily {
+  id              String   @id @default(cuid())
+  userId          String
+  date            DateTime
+  realizedPnl     Float
+  unrealizedPnl   Float
+  feeTotal        Float
+  turnover        Float
+  tradesCount     Int
+  winRate         Float
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+}
+
+model SystemLog {
+  id          String   @id @default(cuid())
+  userId      String?
+  level       LogLevel
+  category    String
+  message     String
+  payload     Json?
+  createdAt   DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([level, createdAt])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  userId      String
+  action      String
+  target      String
+  before      Json?
+  after       Json?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model ReplayNote {
+  id           String   @id @default(cuid())
+  userId       String
+  tradeOrderId String
+  content      String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([tradeOrderId])
+}
