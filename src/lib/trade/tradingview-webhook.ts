@@ -214,7 +214,11 @@ async function buildFullPositionOrderPlan(input: {
   }
 
   const tickerRow = asRecord(ticker);
-  const referencePrice = input.closePrice ?? toNumberOrNull(tickerRow?.last) ?? toNumberOrNull(tickerRow?.askPx) ?? toNumberOrNull(tickerRow?.bidPx);
+  const liveReferencePrice =
+    toNumberOrNull(tickerRow?.last) ??
+    (input.side === "buy" ? toNumberOrNull(tickerRow?.askPx) : toNumberOrNull(tickerRow?.bidPx)) ??
+    (input.side === "buy" ? toNumberOrNull(tickerRow?.bidPx) : toNumberOrNull(tickerRow?.askPx));
+  const referencePrice = liveReferencePrice ?? input.closePrice;
   if (!referencePrice || referencePrice <= 0) {
     throw new Error("无法获取 TradingView 下单参考价格");
   }
