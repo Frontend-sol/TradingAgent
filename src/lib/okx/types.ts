@@ -27,6 +27,11 @@ export interface OkxOrderRequest {
   tpOrdPx?: string;
   slTriggerPx?: string;
   slOrdPx?: string;
+  attachAlgoOrds?: Array<{
+    slTriggerPx?: string;
+    slOrdPx?: string;
+    slTriggerPxType?: "last" | "index" | "mark";
+  }>;
 }
 
 export interface OkxResponse<T> {

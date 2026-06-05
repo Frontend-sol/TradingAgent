@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { DEMO_USER_EMAIL } from "@/lib/utils";
+import { syncDefaultUserConfig } from "@/lib/config/default-user-config";
 
 const riskSchema = z.object({
   maxPositionValue: z.number().min(0),
@@ -75,6 +76,8 @@ export async function POST(request: NextRequest) {
       after: saved,
     },
   });
+
+  await syncDefaultUserConfig(user.id);
 
   return NextResponse.json({ id: saved.id });
 }

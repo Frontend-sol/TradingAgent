@@ -351,8 +351,32 @@ export default function SettingsPage() {
     await persistSystemConfig("LLM 配置已成功更新");
   });
 
+  const persistOkxConfig = async (successText: string) => {
+    try {
+      const response = await fetch("/api/config/system/okx", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(okxForm.getValues()),
+      });
+
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const backendMessage = result?.message || result?.error || "OKX 配置保存失败";
+        throw new Error(`[${response.status}] ${backendMessage}`);
+      }
+
+      setDialog({ open: true, text: successText });
+      router.refresh();
+    } catch (error) {
+      setDialog({
+        open: true,
+        text: error instanceof Error ? `保存失败：${error.message}` : "保存失败，请检查 OKX 配置。",
+      });
+    }
+  };
+
   const saveOkx = okxForm.handleSubmit(async () => {
-    await persistSystemConfig("OKX 配置已成功更新");
+    await persistOkxConfig("OKX 配置已成功更新");
   });
 
   const testOkxConnection = async () => {
@@ -379,7 +403,7 @@ export default function SettingsPage() {
         return;
       }
 
-      await persistSystemConfig("连接测试成功，配置已自动保存并同步。");
+      await persistOkxConfig("连接测试成功，OKX 配置已自动保存并同步。");
     } catch (error) {
       setDialog({
         open: true,
@@ -437,7 +461,7 @@ export default function SettingsPage() {
             <div className="space-y-2">
               <label className="text-sm text-primary-text">max tokens</label>
               <FieldHint>单次响应最大长度，过大会增加成本与延迟。</FieldHint>
-              <Input type="number" {...llmForm.register("maxTokens", { valueAsNumber: true })} />
+              <Input type="number" min={32} max={4000} {...llmForm.register("maxTokens", { valueAsNumber: true })} />
             </div>
 
             <div className="md:col-span-2 rounded-md border border-border p-3">

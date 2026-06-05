@@ -82,6 +82,7 @@ model User {
   promptConfigs    TradingPromptConfig[]
   strategyConfigs  StrategyConfig[]
   riskConfigs      RiskConfig[]
+  defaultConfig    UserDefaultConfig?
   subscriptions    InstrumentSubscription[]
   aiDecisionLogs   AiDecisionLog[]
   tradeOrders      TradeOrder[]
@@ -92,6 +93,22 @@ model User {
   systemLogs       SystemLog[]
   auditLogs        AuditLog[]
   replayNotes      ReplayNote[]
+}
+
+model UserDefaultConfig {
+  id                 String   @id @default(cuid())
+  userId             String   @unique
+  activeSystemPrompt String
+  activeUserPrompt   String
+  llmConfig          Json
+  okxConfig          Json
+  strategyConfig     Json
+  riskConfig         Json?
+  promptTemplates    Json
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model ExchangeAccount {
@@ -172,6 +189,16 @@ model StrategyConfig {
   llmPromptTemplate       String    @default("请基于以下信息输出交易决策JSON：\\n标的：{{symbol}}\\n时间：{{timestamp}}\\n账户：{{balance}}\\n行情：{{market_data}}")
   mode                    TradeMode @default(analysis)
   autoTradingEnabled      Boolean   @default(false)
+  enableAiListener        Boolean   @default(true)
+  enableTradingviewListener Boolean @default(false)
+  tradingviewMode         TradeMode @default(paper)
+  tradingviewLeverage     Float     @default(3)
+  tradingviewOpenBalancePct Float   @default(100)
+  tradingviewStopLossPct  Float     @default(3)
+  lastRunStartedAt        DateTime?
+  lastRunFinishedAt       DateTime?
+  schedulerLockedUntil    DateTime?
+  schedulerOwner          String?
   createdAt               DateTime  @default(now())
   updatedAt               DateTime  @updatedAt
 

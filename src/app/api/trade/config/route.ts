@@ -3,6 +3,8 @@ import { TradeMode } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { DEMO_USER_EMAIL } from "@/lib/utils";
+import { startTradingTask, stopTradingTask } from "@/lib/trade/scheduler";
+import { syncDefaultUserConfig } from "@/lib/config/default-user-config";
 
 const barEnum = z.enum(["15s", "1m", "3m", "5m", "15m", "1h"]);
 
@@ -12,6 +14,12 @@ const schema = z.object({
   maxLeverage: z.number().min(1).max(100),
   symbols: z.array(z.string()).min(1),
   autoTradingEnabled: z.boolean(),
+  enableAiListener: z.boolean().default(true),
+  enableTradingviewListener: z.boolean().default(false),
+  tradingviewMode: z.nativeEnum(TradeMode).default(TradeMode.paper),
+  tradingviewLeverage: z.number().min(1).max(15).default(3),
+  tradingviewOpenBalancePct: z.number().min(1).max(100).default(100),
+  tradingviewStopLossPct: z.number().min(0.1).max(30).default(3),
   llmPromptTemplate: z.string().min(1),
 });
 
@@ -37,6 +45,12 @@ export async function GET() {
         maxLeverage: 3,
         symbols: ["BTC-USDT"],
         autoTradingEnabled: false,
+        enableAiListener: true,
+        enableTradingviewListener: false,
+        tradingviewMode: TradeMode.paper,
+        tradingviewLeverage: 3,
+        tradingviewOpenBalancePct: 100,
+        tradingviewStopLossPct: 3,
         llmPromptTemplate: DEFAULT_TEMPLATE,
       },
     });
@@ -54,6 +68,12 @@ export async function GET() {
       maxLeverage: strategy.maxLeverage || 3,
       symbols: normalizedSymbols,
       autoTradingEnabled: strategy.autoTradingEnabled,
+      enableAiListener: strategy.enableAiListener,
+      enableTradingviewListener: strategy.enableTradingviewListener,
+      tradingviewMode: strategy.tradingviewMode,
+      tradingviewLeverage: strategy.tradingviewLeverage,
+      tradingviewOpenBalancePct: strategy.tradingviewOpenBalancePct,
+      tradingviewStopLossPct: strategy.tradingviewStopLossPct,
       llmPromptTemplate: strategy.llmPromptTemplate || DEFAULT_TEMPLATE,
     },
   });
@@ -77,6 +97,12 @@ export async function POST(request: NextRequest) {
     leverage: (payload.minLeverage + payload.maxLeverage) / 2,
     symbols: payload.symbols,
     autoTradingEnabled: payload.autoTradingEnabled,
+    enableAiListener: payload.enableAiListener,
+    enableTradingviewListener: payload.enableTradingviewListener,
+    tradingviewMode: payload.tradingviewMode,
+    tradingviewLeverage: payload.tradingviewLeverage,
+    tradingviewOpenBalancePct: payload.tradingviewOpenBalancePct,
+    tradingviewStopLossPct: payload.tradingviewStopLossPct,
     llmPromptTemplate: payload.llmPromptTemplate,
     mode: TradeMode.paper,
   };
@@ -100,5 +126,11 @@ export async function POST(request: NextRequest) {
         },
       });
 
-  return NextResponse.json({ data: saved });
+  const scheduler = payload.autoTradingEnabled
+    ? await startTradingTask()
+    : stopTradingTask();
+
+  await syncDefaultUserConfig(user.id);
+
+  return NextResponse.json({ data: saved, scheduler });
 }

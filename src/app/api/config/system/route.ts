@@ -5,6 +5,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { encryptText } from "@/lib/crypto";
 import { DEMO_USER_EMAIL, maskSecret } from "@/lib/utils";
+import { syncDefaultUserConfig } from "@/lib/config/default-user-config";
 
 export const dynamic = "force-dynamic";
 
@@ -79,7 +80,7 @@ export async function GET() {
   ]);
   let llm = existingLlm;
 
-  if (!llm) {
+    if (!llm) {
     const defaults = buildEnvLlmDefaults();
     llm = await prisma.llmProviderConfig.create({
       data: {
@@ -99,8 +100,9 @@ export async function GET() {
         multiModelVoting: defaults.multiModelVoting,
         structuredReasonOutput: defaults.structuredReasonOutput,
       },
-    });
-  }
+      });
+      await syncDefaultUserConfig(user.id);
+    }
 
   return NextResponse.json({
     data: {
@@ -229,6 +231,8 @@ export async function POST(request: NextRequest) {
             ...okxData,
           },
         });
+
+    await syncDefaultUserConfig(user.id);
 
     revalidatePath("/settings");
     revalidatePath("/dashboard");

@@ -13,6 +13,7 @@ const configItems = [
 
 const logItems = [
   { href: "/trade-logs", label: "交易日志" },
+  { href: "/tv-logs", label: "TV Webhook 日志" },
   { href: "/ai-logs", label: "AI 决策日志" },
 ];
 

@@ -104,6 +104,8 @@ async function main() {
       maxDrawdownPct: 12,
       mode: TradeMode.analysis,
       autoTradingEnabled: false,
+      enableAiListener: true,
+      enableTradingviewListener: false,
     },
   });
 

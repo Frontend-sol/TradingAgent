@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,7 +11,35 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 
-const symbolOptions = ["BTC-USDT", "ETH-USDT", "SOL-USDT", "XRP-USDT"] as const;
+const symbolOptions = [
+  "BTC-USDT",
+  "ETH-USDT",
+  "SOL-USDT",
+  "XRP-USDT",
+  "BNB-USDT",
+  "DOGE-USDT",
+  "ADA-USDT",
+  "AVAX-USDT",
+  "LINK-USDT",
+  "DOT-USDT",
+  "TRX-USDT",
+  "LTC-USDT",
+  "BCH-USDT",
+  "UNI-USDT",
+  "AAVE-USDT",
+  "APT-USDT",
+  "ARB-USDT",
+  "OP-USDT",
+  "SUI-USDT",
+  "NEAR-USDT",
+  "FIL-USDT",
+  "ETC-USDT",
+  "ATOM-USDT",
+  "INJ-USDT",
+  "PEPE-USDT",
+  "WIF-USDT",
+  "SHIB-USDT",
+] as const;
 const MASK_PLACEHOLDER = "********";
 const MAX_PROMPTS_PER_TYPE = 4;
 
@@ -37,6 +65,12 @@ const schema = z.object({
   maxLeverage: z.number().min(1).max(100),
   symbols: z.array(z.string()).min(1),
   autoTradingEnabled: z.boolean(),
+  enableAiListener: z.boolean(),
+  enableTradingviewListener: z.boolean(),
+  tradingviewMode: z.enum(["paper", "live"]),
+  tradingviewLeverage: z.number().min(1).max(15),
+  tradingviewOpenBalancePct: z.number().min(1).max(100),
+  tradingviewStopLossPct: z.number().min(0.1).max(30),
   llmPromptTemplate: z.string().min(1),
 });
 
@@ -113,12 +147,22 @@ export default function TradingConfigPage() {
       maxLeverage: 3,
       symbols: ["BTC-USDT"],
       autoTradingEnabled: false,
+      enableAiListener: true,
+      enableTradingviewListener: false,
+      tradingviewMode: "paper",
+      tradingviewLeverage: 3,
+      tradingviewOpenBalancePct: 100,
+      tradingviewStopLossPct: 3,
       llmPromptTemplate: defaultTradingPrompt,
     },
   });
 
   const systemPrompts = promptTemplates.filter((item) => item.promptType === "system");
   const userPrompts = promptTemplates.filter((item) => item.promptType === "user");
+  const selectedSymbols = useWatch({ control: form.control, name: "symbols" }) || [];
+  const autoTradingEnabled = useWatch({ control: form.control, name: "autoTradingEnabled" });
+  const enableAiListener = useWatch({ control: form.control, name: "enableAiListener" });
+  const enableTradingviewListener = useWatch({ control: form.control, name: "enableTradingviewListener" });
 
   const loadPromptTemplates = async () => {
     setPromptLoading(true);
@@ -145,6 +189,12 @@ export default function TradingConfigPage() {
           maxLeverage: data.maxLeverage,
           symbols: data.symbols,
           autoTradingEnabled: data.autoTradingEnabled,
+          enableAiListener: data.enableAiListener ?? true,
+          enableTradingviewListener: data.enableTradingviewListener ?? false,
+          tradingviewMode: data.tradingviewMode ?? "paper",
+          tradingviewLeverage: data.tradingviewLeverage ?? 3,
+          tradingviewOpenBalancePct: data.tradingviewOpenBalancePct ?? 100,
+          tradingviewStopLossPct: data.tradingviewStopLossPct ?? 3,
           llmPromptTemplate: data.llmPromptTemplate,
         });
         setUserPrompt(data.llmPromptTemplate || defaultTradingPrompt);
@@ -209,6 +259,7 @@ export default function TradingConfigPage() {
         setStatusText("任务状态未知");
       });
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadPromptTemplates();
   }, [form]);
 
@@ -219,6 +270,7 @@ export default function TradingConfigPage() {
     const userHit = promptTemplates.find(
       (item) => item.promptType === "user" && item.content.trim() === (userPrompt || "").trim(),
     );
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setActivePromptIds({
       system: systemHit?.id || null,
       user: userHit?.id || null,
@@ -388,15 +440,8 @@ export default function TradingConfigPage() {
     form.setValue("symbols", next.length ? next : ["BTC-USDT"], { shouldValidate: true });
   };
 
-  const onSave = form.handleSubmit(async (values) => {
-    if (values.minLeverage > values.maxLeverage) {
-      alert("最小杠杆不能大于最大杠杆");
-      return;
-    }
-
-    const effectiveUserPrompt = userPrompt.trim() || values.llmPromptTemplate;
-
-    const tradeResponse = await fetch("/api/trade/config", {
+  const saveTradeConfig = async (values: FormValues, effectiveUserPrompt = userPrompt.trim() || values.llmPromptTemplate) => {
+    const response = await fetch("/api/trade/config", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -405,10 +450,73 @@ export default function TradingConfigPage() {
       }),
     });
 
-    const tradeResult = await tradeResponse.json().catch(() => ({}));
-    if (!tradeResponse.ok) {
-      alert(`保存失败：${tradeResult?.message || tradeResult?.error || "未知错误"}`);
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(result?.message || result?.error || "未知错误");
+    }
+    return result;
+  };
+
+  const toggleAiChannel = async (enabled: boolean) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const values = {
+        ...form.getValues(),
+        autoTradingEnabled: enabled,
+        enableAiListener: enabled,
+      };
+      form.setValue("autoTradingEnabled", enabled, { shouldDirty: true });
+      form.setValue("enableAiListener", enabled, { shouldDirty: true });
+      const result = await saveTradeConfig(values);
+      setStatusText(enabled ? `AI 交易运行中（${result?.scheduler?.expression || "cron"}）` : "AI 交易已停止");
+    } catch (error) {
+      alert(`AI 交易开关保存失败：${error instanceof Error ? error.message : "未知错误"}`);
+      form.setValue("autoTradingEnabled", !enabled);
+      form.setValue("enableAiListener", !enabled);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleTradingViewChannel = async (enabled: boolean) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const values = {
+        ...form.getValues(),
+        enableTradingviewListener: enabled,
+      };
+      form.setValue("enableTradingviewListener", enabled, { shouldDirty: true });
+      await saveTradeConfig(values);
+      setStatusText(enabled ? "TradingView webhook 监听已开启" : "TradingView webhook 监听已关闭");
+    } catch (error) {
+      alert(`TradingView 监听开关保存失败：${error instanceof Error ? error.message : "未知错误"}`);
+      form.setValue("enableTradingviewListener", !enabled);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onSave = form.handleSubmit(async (values) => {
+    if (values.minLeverage > values.maxLeverage) {
+      alert("最小杠杆不能大于最大杠杆");
       return;
+    }
+
+    const effectiveUserPrompt = userPrompt.trim() || values.llmPromptTemplate;
+
+    let tradeResult: { scheduler?: { expression?: string } };
+    try {
+      tradeResult = await saveTradeConfig(values, effectiveUserPrompt);
+    } catch (error) {
+      alert(`保存失败：${error instanceof Error ? error.message : "未知错误"}`);
+      return;
+    }
+    if (values.autoTradingEnabled) {
+      setStatusText(`任务运行中（${tradeResult?.scheduler?.expression || "cron"}）`);
+    } else {
+      setStatusText("任务未启动");
     }
 
     const llmSnapshot = systemConfig.llm;
@@ -458,14 +566,29 @@ export default function TradingConfigPage() {
   const startTask = async () => {
     setBusy(true);
     try {
-      const response = await fetch("/api/trade/start", { method: "POST" });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok || !result?.ok) {
-        alert(`启动失败：${result?.message || "未知错误"}`);
+      const values = form.getValues();
+      if (values.minLeverage > values.maxLeverage) {
+        alert("最小杠杆不能大于最大杠杆");
         return;
       }
-      setStatusText(`任务运行中（${result?.data?.expression || "cron"}）`);
-      alert("自动交易任务已启动");
+
+      const effectiveUserPrompt = userPrompt.trim() || values.llmPromptTemplate;
+      form.setValue("autoTradingEnabled", true);
+      form.setValue("enableAiListener", true);
+
+      const result = await saveTradeConfig({
+        ...values,
+        autoTradingEnabled: true,
+        enableAiListener: true,
+      }, effectiveUserPrompt).catch((error) => {
+        alert(`启动失败：${error instanceof Error ? error.message : "未知错误"}`);
+        return null;
+      });
+      if (!result) {
+        return;
+      }
+      setStatusText(`AI 交易运行中（${result?.scheduler?.expression || "cron"}）`);
+      alert("AI 自动交易已启动，已触发立即执行");
     } finally {
       setBusy(false);
     }
@@ -474,9 +597,16 @@ export default function TradingConfigPage() {
   const stopTask = async () => {
     setBusy(true);
     try {
-      await fetch("/api/trade/stop", { method: "POST" });
-      setStatusText("任务已停止");
-      alert("自动交易任务已停止");
+      const values = {
+        ...form.getValues(),
+        autoTradingEnabled: false,
+        enableAiListener: false,
+      };
+      form.setValue("autoTradingEnabled", false);
+      form.setValue("enableAiListener", false);
+      await saveTradeConfig(values);
+      setStatusText("AI 交易已停止");
+      alert("AI 自动交易已停止");
     } finally {
       setBusy(false);
     }
@@ -485,10 +615,80 @@ export default function TradingConfigPage() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>交易配置（自动交易 Demo）</CardTitle>
+        <CardTitle>交易配置</CardTitle>
       </CardHeader>
       <CardContent>
         <form className="grid gap-4 md:grid-cols-2" onSubmit={onSave}>
+          <div className="md:col-span-2 grid gap-3 lg:grid-cols-2">
+            <div className="rounded-md border border-border bg-panel-soft p-4">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <div className="text-sm font-semibold text-primary-text">AI 自动交易通道</div>
+                  <div className="mt-1 text-xs text-secondary-text">
+                    开启后按下方 AI 策略配置定时拉取 OKX 数据并调用 LLM；关闭会同时停止 AI 监听和自动交易任务。
+                  </div>
+                </div>
+                <Switch
+                  checked={Boolean(autoTradingEnabled && enableAiListener)}
+                  onCheckedChange={(value) => {
+                    void toggleAiChannel(value);
+                  }}
+                />
+              </div>
+            </div>
+            <div className="rounded-md border border-border bg-panel-soft p-4">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <div className="text-sm font-semibold text-primary-text">TradingView Webhook 通道</div>
+                  <div className="mt-1 text-xs text-secondary-text">
+                    开启后只接收 TradingView 警报信号并按 webhook 规则执行；不调用 LLM，也不依赖 AI 定时任务。
+                  </div>
+                </div>
+                <Switch
+                  checked={Boolean(enableTradingviewListener)}
+                  onCheckedChange={(value) => {
+                    void toggleTradingViewChannel(value);
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="md:col-span-2 rounded-md border border-border bg-panel-soft p-4">
+            <div className="mb-4">
+              <div className="text-sm font-semibold text-primary-text">TradingView 交易配置</div>
+              <div className="mt-1 text-xs text-secondary-text">
+                仅影响 TradingView webhook 信号：开仓/加仓会按可用 USDT 的指定比例计算合约张数，并自动附带止损。
+              </div>
+            </div>
+            <div className="grid gap-4 md:grid-cols-4">
+              <div className="space-y-2">
+                <label className="text-sm text-primary-text">TV 执行模式</label>
+                <Select {...form.register("tradingviewMode")}>
+                  <option value="paper">paper 模拟记录</option>
+                  <option value="live">OKX 下单</option>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm text-primary-text">TV 杠杆倍数</label>
+                <Input type="number" min={1} max={15} step="1" {...form.register("tradingviewLeverage", { valueAsNumber: true })} />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm text-primary-text">开仓余额比例 (%)</label>
+                <Input type="number" min={1} max={100} step="1" {...form.register("tradingviewOpenBalancePct", { valueAsNumber: true })} />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm text-primary-text">自动止损 (%)</label>
+                <Input type="number" min={0.1} max={30} step="0.1" {...form.register("tradingviewStopLossPct", { valueAsNumber: true })} />
+              </div>
+            </div>
+          </div>
+
+          <div className="md:col-span-2 rounded-md border border-border bg-panel-soft p-4">
+            <div className="text-sm font-semibold text-primary-text">AI 交易配置</div>
+            <div className="mt-1 text-xs text-secondary-text">以下参数只影响 AI 自动交易通道，不影响 TradingView webhook 的开关状态。</div>
+          </div>
+
           <div className="space-y-2">
             <label className="text-sm text-primary-text">K线监听周期</label>
             <Select {...form.register("timeframe")}>
@@ -496,17 +696,6 @@ export default function TradingConfigPage() {
                 <option key={item} value={item}>{item}</option>
               ))}
             </Select>
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-sm text-primary-text">是否开启自动交易</label>
-            <div className="rounded-md border border-border p-3 flex items-center justify-between">
-              <span className="text-sm text-primary-text">自动交易开关</span>
-              <Switch
-                checked={form.watch("autoTradingEnabled")}
-                onCheckedChange={(value) => form.setValue("autoTradingEnabled", value)}
-              />
-            </div>
           </div>
 
           <div className="space-y-2">
@@ -521,9 +710,12 @@ export default function TradingConfigPage() {
 
           <div className="md:col-span-2 space-y-2">
             <label className="text-sm text-primary-text">交易币种（多选）</label>
-            <div className="grid gap-2 md:grid-cols-4">
+            <p className="text-xs text-secondary-text">
+              选中的币种会在下一轮 OKX 数据抓取和 LLM prompt 中自动扩展同一套 3m/4H/funding/OI 指标。
+            </p>
+            <div className="grid max-h-80 gap-2 overflow-y-auto rounded-md border border-border p-2 sm:grid-cols-2 md:grid-cols-4 xl:grid-cols-6">
               {symbolOptions.map((symbol) => {
-                const selected = form.watch("symbols").includes(symbol);
+                const selected = selectedSymbols.includes(symbol);
                 return (
                   <label
                     key={symbol}
@@ -623,6 +815,7 @@ export default function TradingConfigPage() {
                         <div>{"{{exchange}}"}: 交易所名称</div>
                         <div>{"{{contract}}"}: 合约类型（perpetual）</div>
                         <div>{"{{asset_universe}}"}: 可交易币种列表</div>
+                        <div>{"{{selected_symbols}}"}: 当前选中的交易币种</div>
                         <div>{"{{decision_frequency}}"}: 决策频率/策略周期</div>
                         <div>{"{{timestamp}}"}: 当前时间（ISO）</div>
                         <div>{"{{timeframe}}"}: 当前策略周期（如 15s/1m/5m）</div>
@@ -720,8 +913,8 @@ export default function TradingConfigPage() {
           <div className="md:col-span-2 rounded-md border border-border p-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div className="text-sm text-secondary-text">当前任务状态：{statusText}</div>
             <div className="flex gap-2">
-              <Button type="button" variant="secondary" onClick={startTask} disabled={busy}>启动交易</Button>
-              <Button type="button" variant="danger" onClick={stopTask} disabled={busy}>停止交易</Button>
+              <Button type="button" variant="secondary" onClick={startTask} disabled={busy}>启动 AI 交易</Button>
+              <Button type="button" variant="danger" onClick={stopTask} disabled={busy}>停止 AI 交易</Button>
               <Button type="submit" disabled={busy}>保存配置</Button>
             </div>
           </div>

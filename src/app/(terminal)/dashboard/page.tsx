@@ -6,7 +6,29 @@ async function getOverview() {
   const response = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000"}/api/dashboard/overview`, {
     cache: "no-store",
   });
-  return response.json();
+  const text = await response.text();
+  if (!text) {
+    return {
+      metrics: null,
+      equityCurve: [],
+      latestTradingViewLogs: [],
+      latestTrades: [],
+      latestDecisions: [],
+      okxStatus: { configured: false, message: "Dashboard API 返回空响应。" },
+    };
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {
+      metrics: null,
+      equityCurve: [],
+      latestTradingViewLogs: [],
+      latestTrades: [],
+      latestDecisions: [],
+      okxStatus: { configured: false, message: "Dashboard API 返回了非 JSON 响应。" },
+    };
+  }
 }
 
 export default async function DashboardPage() {
@@ -40,6 +62,32 @@ export default async function DashboardPage() {
     }
 
     return Number(value).toFixed(2);
+  };
+
+  const formatTime = (value: string) => new Date(value).toLocaleString("zh-CN", { hour12: false });
+
+  const compactPayload = (payload: unknown) => {
+    if (!payload || typeof payload !== "object") return null;
+    const row = payload as {
+      signal?: { instId?: string; kind?: string; rawMessage?: string };
+      action?: string;
+      side?: string;
+      quantity?: number;
+      status?: string;
+      error?: string;
+      orderId?: string;
+    };
+    return {
+      symbol: row.signal?.instId,
+      kind: row.signal?.kind,
+      action: row.action,
+      side: row.side,
+      quantity: row.quantity,
+      status: row.status,
+      error: row.error,
+      orderId: row.orderId,
+      rawMessage: row.signal?.rawMessage,
+    };
   };
 
   return (
@@ -84,10 +132,50 @@ export default async function DashboardPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>资金曲线</CardTitle>
+          <CardTitle>收益 / 资金曲线</CardTitle>
         </CardHeader>
         <CardContent>
           <EquityCurveChart data={data.equityCurve || []} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>TradingView Webhook 日志</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2 text-sm">
+          {(data.latestTradingViewLogs || []).length ? (
+            data.latestTradingViewLogs.map((item: { id: string; level: string; message: string; payload: unknown; createdAt: string }) => {
+              const payload = compactPayload(item.payload);
+              return (
+                <div key={item.id} className="rounded border border-slate-800 bg-panel-soft p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="font-medium text-primary-text">{item.message}</div>
+                    <div className={item.level === "error" ? "text-red-300" : item.level === "warn" ? "text-amber-300" : "text-emerald-300"}>
+                      {item.level.toUpperCase()} · {formatTime(item.createdAt)}
+                    </div>
+                  </div>
+                  {payload ? (
+                    <div className="mt-2 grid gap-1 text-secondary-text md:grid-cols-4">
+                      <div>标的：{payload.symbol || "--"}</div>
+                      <div>信号：{payload.kind || "--"}</div>
+                      <div>动作：{payload.action || payload.side || "--"}</div>
+                      <div>状态：{payload.status || (payload.error ? "failed" : "--")}</div>
+                    </div>
+                  ) : null}
+                  {payload?.rawMessage || payload?.error ? (
+                    <div className="mt-2 rounded bg-black/20 px-2 py-1 text-xs text-slate-400">
+                      {payload.error || payload.rawMessage}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })
+          ) : (
+            <div className="rounded border border-slate-800 p-3 text-secondary-text">
+              暂无 TradingView webhook 信号。收到第一条警报后这里会显示解析和执行结果。
+            </div>
+          )}
         </CardContent>
       </Card>
 

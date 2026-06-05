@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { encryptText } from "@/lib/crypto";
 import { DEMO_USER_EMAIL, maskSecret } from "@/lib/utils";
 import { z } from "zod";
+import { syncDefaultUserConfig } from "@/lib/config/default-user-config";
 
 const llmSchema = z.object({
   provider: z.string().min(1),
@@ -73,6 +74,7 @@ export async function GET() {
         structuredReasonOutput: defaults.structuredReasonOutput,
       },
     });
+    await syncDefaultUserConfig(user.id);
   }
 
   return NextResponse.json({
@@ -115,6 +117,8 @@ export async function POST(request: NextRequest) {
           isDefault: true,
         },
       });
+
+  await syncDefaultUserConfig(user.id);
 
   return NextResponse.json({ id: saved.id });
 }

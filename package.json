@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "prisma generate",
     "dev": "next dev --webpack",
+    "prebuild": "prisma generate",
     "build": "next build --webpack",
     "start": "next start",
     "test": "tsx --test src/lib/trade/execution-guards.test.ts",

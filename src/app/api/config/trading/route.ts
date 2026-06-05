@@ -3,6 +3,7 @@ import { TradeMode } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { DEMO_USER_EMAIL } from "@/lib/utils";
+import { syncDefaultUserConfig } from "@/lib/config/default-user-config";
 
 const tradingSchema = z.object({
   symbols: z.array(z.string()).min(1),
@@ -15,6 +16,8 @@ const tradingSchema = z.object({
   maxDrawdownPct: z.number().min(1).max(80),
   mode: z.nativeEnum(TradeMode),
   autoTradingEnabled: z.boolean(),
+  enableAiListener: z.boolean().default(true),
+  enableTradingviewListener: z.boolean().default(false),
 });
 
 export async function GET() {
@@ -56,6 +59,8 @@ export async function POST(request: NextRequest) {
       after: saved,
     },
   });
+
+  await syncDefaultUserConfig(user.id);
 
   return NextResponse.json({ id: saved.id });
 }

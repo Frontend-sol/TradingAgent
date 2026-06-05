@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { DEMO_USER_EMAIL } from "@/lib/utils";
+import { syncDefaultUserConfig } from "@/lib/config/default-user-config";
 
 const promptTypeEnum = z.enum(["system", "user"]);
 
@@ -79,6 +80,8 @@ export async function POST(request: NextRequest) {
     },
   });
 
+  await syncDefaultUserConfig(user.id);
+
   return NextResponse.json({
     data: {
       ...created,
@@ -105,6 +108,8 @@ export async function PUT(request: NextRequest) {
     },
   });
 
+  await syncDefaultUserConfig(user.id);
+
   return NextResponse.json({
     data: {
       ...updated,
@@ -125,5 +130,6 @@ export async function DELETE(request: NextRequest) {
   if (!existing) return NextResponse.json({ error: "Prompt not found" }, { status: 404 });
 
   await prisma.tradingPromptConfig.delete({ where: { id: existing.id } });
+  await syncDefaultUserConfig(user.id);
   return NextResponse.json({ ok: true });
 }
