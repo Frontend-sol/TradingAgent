@@ -48,6 +48,61 @@ function logTradingViewTerminal(event: string, payload: Record<string, unknown>)
   });
 }
 
+function toJsonValue(value: unknown): Prisma.InputJsonValue {
+  if (value === null) return "null";
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
+  if (value === undefined) return "";
+
+  try {
+    return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+  } catch {
+    return String(value);
+  }
+}
+
+function describeError(error: unknown): Prisma.InputJsonObject {
+  if (error instanceof AggregateError) {
+    return {
+      name: error.name,
+      message: error.message,
+      errors: error.errors.map((item) => describeError(item)),
+    };
+  }
+
+  if (error instanceof Error) {
+    const detail: Record<string, Prisma.InputJsonValue> = {
+      name: error.name,
+      message: error.message,
+    };
+    const maybeError = error as Error & {
+      code?: unknown;
+      errno?: unknown;
+      syscall?: unknown;
+      address?: unknown;
+      port?: unknown;
+      cause?: unknown;
+      response?: { status?: unknown; data?: unknown };
+    };
+
+    if (maybeError.code) detail.code = String(maybeError.code);
+    if (maybeError.errno) detail.errno = String(maybeError.errno);
+    if (maybeError.syscall) detail.syscall = String(maybeError.syscall);
+    if (maybeError.address) detail.address = String(maybeError.address);
+    if (maybeError.port) detail.port = String(maybeError.port);
+    if (maybeError.response) {
+      detail.response = {
+        status: typeof maybeError.response.status === "number" ? maybeError.response.status : null,
+        data: toJsonValue(maybeError.response.data),
+      };
+    }
+    if (maybeError.cause) detail.cause = describeError(maybeError.cause);
+
+    return detail as Prisma.InputJsonObject;
+  }
+
+  return { message: String(error) };
+}
+
 function signalToJson(signal: ParsedTradingViewSignal): Prisma.InputJsonObject {
   return {
     kind: signal.kind,
@@ -284,9 +339,11 @@ export function parseTradingViewSignal(rawBody: string): TradingViewPayload & { 
 
 export async function recordTradingViewWebhookError(rawBody: string, error: unknown) {
   const errorMessage = error instanceof Error ? error.message : String(error);
+  const errorDetail = describeError(error);
   console.error("[tradingview-webhook] failed", {
     timestamp: new Date().toISOString(),
     error: errorMessage,
+    detail: errorDetail,
     rawBody,
   });
 
@@ -297,6 +354,7 @@ export async function recordTradingViewWebhookError(rawBody: string, error: unkn
     message: "TradingView webhook 处理失败",
     payload: {
       error: errorMessage,
+      detail: errorDetail,
       rawBody,
     },
   });
@@ -563,7 +621,6 @@ export async function executeTradingViewWebhook(rawBody: string) {
       closePrice: parsed.signal.closePrice,
     });
     action = actionForSignal(parsed.signal.kind, openSide);
-    await okxAdapter.setLeverage(parsed.signal.instId, leverage, "cross", env);
     orderPayload = {
       instId: parsed.signal.instId,
       tdMode: "cross",
@@ -627,7 +684,53 @@ export async function executeTradingViewWebhook(rawBody: string) {
     };
   }
 
-  const orderResult = await okxAdapter.placeOrder(orderPayload, env);
+  if (openPlan) {
+    try {
+      logTradingViewTerminal("set-leverage-start", {
+        instId: parsed.signal.instId,
+        leverage,
+        env,
+      });
+      await okxAdapter.setLeverage(parsed.signal.instId, leverage, "cross", env);
+      logTradingViewTerminal("set-leverage-success", {
+        instId: parsed.signal.instId,
+        leverage,
+        env,
+      });
+    } catch (error) {
+      logTradingViewTerminal("set-leverage-failed", {
+        instId: parsed.signal.instId,
+        leverage,
+        env,
+        error: error instanceof Error ? error.message : String(error),
+        detail: describeError(error),
+      });
+      throw error;
+    }
+  }
+
+  let orderResult: Awaited<ReturnType<typeof okxAdapter.placeOrder>>;
+  try {
+    logTradingViewTerminal("place-order-start", {
+      instId: orderPayload.instId,
+      side: orderPayload.side,
+      quantity: orderPayload.sz,
+      reduceOnly: orderPayload.reduceOnly ?? false,
+      env,
+    });
+    orderResult = await okxAdapter.placeOrder(orderPayload, env);
+  } catch (error) {
+    logTradingViewTerminal("place-order-failed", {
+      instId: orderPayload.instId,
+      side: orderPayload.side,
+      quantity: orderPayload.sz,
+      reduceOnly: orderPayload.reduceOnly ?? false,
+      env,
+      error: error instanceof Error ? error.message : String(error),
+      detail: describeError(error),
+    });
+    throw error;
+  }
   const orderStatus = statusFromOkxOrderResult(orderResult);
   const order = await createTradeOrder({
     userId: user.id,
