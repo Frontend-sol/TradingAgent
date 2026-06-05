@@ -153,6 +153,7 @@ export const okxAdapter = {
   async placeOrder(payload: OkxOrderRequest, env: OkxEnv = "demo") {
     const client = await getDefaultOkxClient(env);
     const response = await client.postPrivate<Record<string, string>>("/api/v5/trade/order", payload);
+    if (response.code === "1" && response.data?.[0]) return response.data[0];
     if (response.code !== "0") throw mapOkxError(response.code, response.msg);
     return response.data[0] || null;
   },
